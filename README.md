@@ -1,4 +1,5 @@
 # 扫地机器人（Sweeping Robot）—— STM32F103 + FreeRTOS
+<img width="1195" height="599" alt="8c4cb302e992f6568440545fde6afbf6" src="https://github.com/user-attachments/assets/2d9d17ad-4b53-473e-8623-151f92b61bc1" />
 
 基于 **STM32F103C8T6** 的扫地机器人固件。硬件包含 TB6612 双路电机驱动、HC-SR04 超声波避障、
 R140 吸尘马达，以及蓝牙 / 离线语音 / 串口屏三路人机交互通道。
