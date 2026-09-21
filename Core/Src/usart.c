@@ -19,6 +19,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usart.h"
+#include "app_rtos.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,8 +118,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /* USART1 interrupt Init */
-    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
+    /* USART1 interrupt Init：优先级 5，FreeRTOS 允许在该优先级调用 ...FromISR() 接口 */
+    HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(USART1_IRQn);
   /* USER CODE BEGIN USART1_MspInit 1 */
 
@@ -147,8 +148,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /* USART2 interrupt Init */
-    HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
+    /* USART2 interrupt Init：优先级 5（同 USART1） */
+    HAL_NVIC_SetPriority(USART2_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(USART2_IRQn);
   /* USER CODE BEGIN USART2_MspInit 1 */
 
@@ -177,8 +178,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /* USART3 interrupt Init */
-    HAL_NVIC_SetPriority(USART3_IRQn, 0, 0);
+    /* USART3 interrupt Init：优先级 5（同 USART1） */
+    HAL_NVIC_SetPriority(USART3_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(USART3_IRQn);
   /* USER CODE BEGIN USART3_MspInit 1 */
 
@@ -253,17 +254,22 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
 /* USER CODE BEGIN 1 */
 /**
- * @brief ???¨?òc??????printf??USARTx
- * @retval None
+ * @brief  printf 重定向到 USART1（控制台）
+ * @note   实际发送由 App_ConsoleSend() 完成：内部整串加锁，且使用寄存器级
+ *         轮询发送而不占用 HAL 的 huart->Lock，避免发送阻塞串口接收挂载。
+ *         只能在任务中调用，不能在中断里调用 printf。
  */
 int fputc(int ch, FILE *f)
 {
-  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xffff);
+  char c = (char)ch;
+
+  (void)f;
+  App_ConsoleSend(&c, 1);
   return ch;
 }
 
 /**
- * @brief ???¨?òc??????getchar,scanf??USARTx
+ * @brief  getchar / scanf 重定向到 USART1（调试用，会阻塞等待）
  * @retval None
  */
 int fgetc(FILE *f)

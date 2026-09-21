@@ -201,8 +201,9 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /* TIM4 interrupt Init */
-    HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
+    /* TIM4 interrupt Init：优先级 5，捕获回调里会调用 xSemaphoreGiveFromISR()，
+       优先级必须低于 configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY（数值 >= 5） */
+    HAL_NVIC_SetPriority(TIM4_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(TIM4_IRQn);
   /* USER CODE BEGIN TIM4_MspInit 1 */
 

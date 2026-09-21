@@ -20,7 +20,9 @@ extern "C"
 // #define fan_pin1 GPIO_PIN_14
 // #define fan_pin2 GPIO_PIN_15
 #define Besom_fan_gpio GPIOB
-    extern uint8_t flag_time;
+
+    /* 注意：FreeRTOS 版本中电机的所有动作只在控制任务（app_control.c）里执行，
+       保证执行器只有一个“主人”；上电初始化时 main() 也可以直接调用。 */
     // 电机部分
     void Motor_SetSpeed(uint8_t ch, int8_t Speed);
     void Motor_SetDirection(uint8_t dir); // dir 1:前进 2：后退 3：左转 4：右转

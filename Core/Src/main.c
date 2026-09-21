@@ -4,156 +4,72 @@
 #include "usart.h"
 #include "gpio.h"
 #include "motor.h"
+#include "app_rtos.h"
 #include <stdio.h>
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-char RxBuff1[1], RxBuff2[1], RxBuff3[1], DataBuff[8];
-uint8_t auto_flag, flag_time = 0, wave_flag = 0;
-uint32_t Distance;                          // 距离
-uint32_t HalTime1, HalTime2;                // 临时时间变量
-extern volatile uint32_t TimeCounter, time; // 时间计数，单位10us
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-uint32_t Distance_Calculate(uint32_t count);
-void Delay_us(unsigned long i);
-void sent(void);
-/* USER CODE BEGIN PFP */
-int16_t aaa=0;
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  *
+  * @note   与裸机版本的区别：这里只做“硬件初始化 + 启动调度器”，
+  *         原来的大循环（测距、避障、串口指令）已经拆成 4 个 FreeRTOS 任务，
+  *         具体见 app_rtos.c / app_sensor.c / app_control.c / app_comm.c
+  */
 int main(void)
 {
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
   /* Configure the system clock */
   SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_TIM2_Init();
+  MX_TIM2_Init();  /* 保留配置备用；RTOS 版本改用 TIM4 捕获时间戳测距，不再启动 TIM2 中断 */
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
-  /* USER CODE BEGIN 2 */
-  HAL_UART_Transmit(&huart2, (uint8_t *)"OK", sizeof("OK") - 1, 100); // 蓝牙模块开机测试
-  printf("\r\n");                                                     // 蓝牙模块开机测试
 
-  HAL_UART_Receive_IT(&huart1, (uint8_t *)RxBuff1, 1); // 串口中断
-  HAL_UART_Receive_IT(&huart2, (uint8_t *)RxBuff1, 1); // 串口中断 
-  HAL_UART_Receive_IT(&huart3, (uint8_t *)RxBuff1, 1); // 串口中断
+  /* USER CODE BEGIN 2 */
+  HAL_UART_Transmit(&huart2, (uint8_t *)"OK", sizeof("OK") - 1, 100); /* 沿用原工程：开机提示发往 USART2 */
+  printf("\r\n");
+
+  /* 电机 PWM：CH1 左轮、CH2 右轮、CH3 吸尘器（CH4 扫把预留，与原工程一致） */
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-  // HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);// 扫把部分
+  // HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // 扫把部分
 
-  Motor_SetSpeed(0, 0);
+  Motor_SetSpeed(0, 0); /* 上电先让两个轮子停下来（同时把方向引脚设为正转） */
   Motor_SetSpeed(1, 0);
+  besom_stop();
 
-  HAL_TIM_Base_Start_IT(&htim2);              // 计时
-  HAL_TIM_IC_Start_IT(&htim4, TIM_CHANNEL_3); // 输入捕获
+  /* 超声波回波输入捕获：TIM4_CH3，计数频率 1MHz（1us 分辨率） */
+  HAL_TIM_IC_Start_IT(&htim4, TIM_CHANNEL_3);
 
+  /* 创建 RTOS 对象与 4 个任务，然后启动调度器 */
+  App_RtosInit();
+  vTaskStartScheduler();
   /* USER CODE END 2 */
-  // besom_run();
-//  Motor_SetDirection(1);
-//  medium();
-//  HAL_Delay(3000);
-//  Motor_SetDirection(2);
-//  HAL_Delay(3000);
-//  besom_run();
-//  stop();
-//  HAL_Delay(3000);
-//  besom_stop();
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1) // set dir and then speed
+
+  /* 正常情况下调度器不会返回；走到这里说明内核堆内存不足，启动失败 */
+  Error_Handler();
+  while (1)
   {
-//    medium();// test
-//		if(aaa==1){
-//			HAL_UART_Transmit(&huart2, (uint8_t *)"aaa", sizeof("aaa") - 1, 100);
-//		}
-    sent();
-    Distance = Distance_Calculate(time);
-    printf("%d\r\n", Distance);
-    HAL_Delay(1000);
-    if (auto_flag == 1) // 自动模式，//!可能在delay中进入中断
-    {
-      besom_run();
-      besom_run();
-      sent();
-      medium();
-      Distance = Distance_Calculate(time);
-      printf("%d\r\n", Distance);
-      /* USER CODE END WHILE */
-      if ((flag_time == 0) && (wave_flag == 1)) // 此时收到下降沿
-      {
-        if (Distance <= 25)
-        {
-          Motor_SetDirection(2);
-          quickly();
-          HAL_Delay(3000);
-          Motor_SetDirection(3); // 左
-          left();
-          HAL_Delay(5000);
-        }
-      }
-    }
-    /* USER CODE BEGIN 3 */
   }
-  /* USER CODE END 3 */
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -187,44 +103,10 @@ void SystemClock_Config(void)
   }
 }
 
-/* USER CODE BEGIN 4 */
-/// @brief 当超出测量范围时，传入时间为33ms时，计算得到距离约为561cm，对应测量距离最大值5.6m
-/// @param count 时间计数值（单位10us）
-/// @return
-uint32_t Distance_Calculate(uint32_t count)
-{
-  uint32_t Distance = 0;
-  Distance = (uint32_t)(((float)count * 17) / 100); // 距离单位cm，声速340M/s,时间*速度/2=距离
-  return Distance;
-}
-
-// 等级us级别
-void Delay_us(unsigned long i)
-{
-  unsigned long j;
-  for (; i > 0; i--)
-  {
-    for (j = 5; j > 0; j--)
-      ;
-  }
-}
-
-void sent(void)
-{
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); //!修改
-  HAL_Delay(5);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); //!修改
-  Delay_us(40);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); //!修改
-  Delay_us(40);
-}
-
-/* USER CODE END 4 */
-
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -238,12 +120,12 @@ void Error_Handler(void)
 
 #ifdef USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

@@ -52,9 +52,8 @@ void HardFault_Handler(void);
 void MemManage_Handler(void);
 void BusFault_Handler(void);
 void UsageFault_Handler(void);
-void SVC_Handler(void);
 void DebugMon_Handler(void);
-void PendSV_Handler(void);
+/* SVC_Handler / PendSV_Handler 由 FreeRTOS 移植层提供（见 FreeRTOSConfig.h 的宏映射） */
 void SysTick_Handler(void);
 void TIM2_IRQHandler(void);
 void TIM4_IRQHandler(void);

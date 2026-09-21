@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F103xB</Define>
               <Undefine></Undefine>
-              <IncludePath>..\Core\Inc;..\Core\Src;..\Drivers\CMSIS\Device\ST\STM32F1xx\Include;..\Drivers\CMSIS\Device\ST\STM32F1xx\Source;..\Drivers\CMSIS\Include;..\Drivers\STM32F1xx_HAL_Driver\Inc\Legacy;..\Drivers\STM32F1xx_HAL_Driver\Src;.\design;.\RTE\_design;..\Drivers\STM32F1xx_HAL_Driver\Inc</IncludePath>
+              <IncludePath>..\Core\Inc;..\Core\Src;..\Drivers\CMSIS\Device\ST\STM32F1xx\Include;..\Drivers\CMSIS\Device\ST\STM32F1xx\Source;..\Drivers\CMSIS\Include;..\Drivers\STM32F1xx_HAL_Driver\Inc\Legacy;..\Drivers\STM32F1xx_HAL_Driver\Src;.\design;.\RTE\_design;..\Drivers\STM32F1xx_HAL_Driver\Inc;../Middlewares/FreeRTOS/Source/include;../Middlewares/FreeRTOS/Source/portable/RVDS/ARM_CM3</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -433,6 +433,86 @@
               <FileName>motor.h</FileName>
               <FileType>5</FileType>
               <FilePath>../Core/Inc/motor.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_rtos.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/app_rtos.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_sensor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/app_sensor.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/app_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_comm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/app_comm.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/app_config.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_rtos.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/app_rtos.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_sensor.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/app_sensor.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/app_control.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_comm.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/app_comm.h</FilePath>
+            </File>
+            <File>
+              <FileName>FreeRTOSConfig.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Core/Inc/FreeRTOSConfig.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Middlewares/FreeRTOS</GroupName>
+          <Files>
+            <File>
+              <FileName>tasks.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Middlewares/FreeRTOS/Source/tasks.c</FilePath>
+            </File>
+            <File>
+              <FileName>queue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Middlewares/FreeRTOS/Source/queue.c</FilePath>
+            </File>
+            <File>
+              <FileName>list.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Middlewares/FreeRTOS/Source/list.c</FilePath>
+            </File>
+            <File>
+              <FileName>port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Middlewares/FreeRTOS/Source/portable/RVDS/ARM_CM3/port.c</FilePath>
+            </File>
+            <File>
+              <FileName>heap_4.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Middlewares/FreeRTOS/Source/portable/MemMang/heap_4.c</FilePath>
             </File>
           </Files>
         </Group>
