@@ -1,0 +1,38 @@
+# Keil MDK-ARM 编译产物（源码与工程文件仍需提交）
+MDK-ARM/design/
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvoptx
+MDK-ARM/*.bak
+MDK-ARM/*.dep
+MDK-ARM/*.scvd
+MDK-ARM/JLinkLog.txt
+MDK-ARM/Listings/
+MDK-ARM/Objects/
+MDK-ARM/EventRecorderStub.scvd
+
+# 常见编译/中间文件
+*.o
+*.crf
+*.axf
+*.hex
+*.bin
+*.elf
+*.map
+*.lst
+*.htm
+*.lnp
+*.d
+*.sct
+*.build_log.htm
+*.iex
+*.i
+*.tra
+*.__i
+
+# 编辑器 / 系统
+.vscode/
+.vs/
+*.swp
+*~
+Thumbs.db
+desktop.ini
