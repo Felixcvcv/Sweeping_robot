@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫地机器人仿真 · Sweeping Robot Simulator</title>
+<style>
+  :root {
+    --bg: #0e1420;
+    --card: #182134;
+    --card-border: #2a3650;
+    --accent: #4fc3f7;
+    --text: #dbe4f0;
+    --muted: #8899b4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  header { max-width: 1320px; margin: 0 auto 12px; }
+  header h1 { font-size: 22px; font-weight: 600; }
+  header h1 small { color: var(--accent); font-size: 14px; margin-left: 8px; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  main {
+    max-width: 1320px;
+    margin: 0 auto;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  #sim {
+    background: #222;
+    border-radius: 10px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, .45);
+  }
+  aside {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid #2a3650;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .card h2 {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: Consolas, monospace; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.on  { background: #14532d; color: #4ade80; }
+  .badge.off { background: #3f1d1d; color: #f87171; }
+  .bar {
+    height: 10px;
+    background: #0b101c;
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 6px 0 4px;
+  }
+  .bar > div {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #38bdf8, #34d399);
+    transition: width .2s;
+  }
+  #console {
+    background: #070b13;
+    border-radius: 6px;
+    height: 120px;
+    overflow-y: auto;
+    padding: 6px 8px;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    color: #7ee787;
+    white-space: pre-wrap;
+  }
+  table.keys { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.keys td { padding: 3px 4px; border-bottom: 1px solid #233050; }
+  table.keys tr:last-child td { border-bottom: none; }
+  table.keys td:first-child { width: 74px; }
+  kbd {
+    background: #0b101c;
+    border: 1px solid #33415e;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 5px;
+    font-family: Consolas, monospace;
+    font-size: 11.5px;
+  }
+  .cmd { color: #fbbf24; font-family: Consolas, monospace; }
+  .hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  footer {
+    max-width: 1320px;
+    margin: 12px auto 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>扫地机器人仿真 <small>Sweeping Robot Simulator</small></h1>
+  <p>控制逻辑 1:1 复刻 STM32F103 + FreeRTOS 固件（Core/Src/app_control.c、app_config.h）：指令协议、PWM 档位、超声波避障状态机、尾部吸尘风扇。</p>
+</header>
+<main>
+  <canvas id="sim" width="960" height="680"></canvas>
+  <aside>
+    <div class="card">
+      <h2>整机状态</h2>
+      <div class="kv"><span class="k">工作模式</span><span class="v" id="hud-mode">manual</span></div>
+      <div class="kv"><span class="k">速度档位</span><span class="v" id="hud-gear">中速 (80)</span></div>
+      <div class="kv"><span class="k">左轮 PWM (TIM3_CH1)</span><span class="v" id="hud-pwml">0</span></div>
+      <div class="kv"><span class="k">右轮 PWM (TIM3_CH2)</span><span class="v" id="hud-pwmr">0</span></div>
+      <div class="kv"><span class="k">尾部风扇 (TIM3_CH3)</span><span class="v"><span class="badge off" id="hud-fan">OFF</span></span></div>
+      <div class="kv"><span class="k">超声波距离 (HC-SR04)</span><span class="v" id="hud-dist">--- cm</span></div>
+      <div class="kv"><span class="k">最近指令</span><span class="v cmd" id="hud-cmd">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>清扫进度</h2>
+      <div class="bar"><div id="hud-bar"></div></div>
+      <div class="kv"><span class="k">已吸入灰尘</span><span class="v" id="hud-clean">0 / 0 (0%)</span></div>
+    </div>
+
+    <div class="card">
+      <h2>遥测输出（USART1，1s 周期）</h2>
+      <div id="console"></div>
+    </div>
+
+    <div class="card">
+      <h2>键盘操控（对应串口指令）</h2>
+      <table class="keys">
+        <tr><td><kbd>W</kbd> / <kbd>↑</kbd></td><td class="cmd">0x02</td><td>前进</td></tr>
+        <tr><td><kbd>S</kbd> / <kbd>↓</kbd></td><td class="cmd">0x03</td><td>后退</td></tr>
+        <tr><td><kbd>A</kbd> / <kbd>←</kbd></td><td class="cmd">0x04</td><td>左转（差速 40/100）</td></tr>
+        <tr><td><kbd>D</kbd> / <kbd>→</kbd></td><td class="cmd">0x05</td><td>右转（差速 100/40）</td></tr>
+        <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td class="cmd">0x08/07/06</td><td>慢速 60 / 中速 80 / 快速 100</td></tr>
+        <tr><td><kbd>F</kbd></td><td class="cmd">0x09</td><td>吸尘器（尾部风扇）开/关</td></tr>
+        <tr><td><kbd>G</kbd>/<kbd>Enter</kbd></td><td class="cmd">0x10</td><td>自动模式（避障 + 吸尘）</td></tr>
+        <tr><td><kbd>Space</kbd></td><td class="cmd">0x01</td><td>停止（退出自动、关风扇）</td></tr>
+        <tr><td><kbd>R</kbd></td><td>—</td><td>重置仿真（撒新灰尘）</td></tr>
+      </table>
+    </div>
+
+    <div class="card hint">
+      仿真设定：机器人一旦开始行驶（手动或自动）尾部风扇即联动开启，吸入尾部刷盘
+      附近的灰尘；停止（0x01）时风扇关闭。自动模式复刻固件状态机：
+      前进 → 障碍 ≤25cm → 快速后退 3s → 左转 5s → 继续前进。
+    </div>
+  </aside>
+</main>
+<footer>
+  直接双击打开本页面即可运行，无需任何依赖。仓库：https://github.com/Felixcvcv/Sweeping_robot
+</footer>
+<script src="sim.js"></script>
+</body>
+</html>
