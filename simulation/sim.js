@@ -4,12 +4,16 @@
  * 控制逻辑复刻 STM32 固件（design/Core/）：
  *   - 指令协议      app_config.h   CMD_*（0x01~0x10）
  *   - 速度档位      motor.c        slow=60 / medium=80 / quickly=100 / 转向差速 40|100
- *   - 自动模式      app_control.c  前进 →(≤25cm)→ 快速后退 3s → 左转 5s → 前进
+ *   - 自动模式      app_control.c  前进 →(障碍<20cm)→ 快速后退 3s → 左转 5s → 前进
  *   - 超声波        app_sensor.c   100ms 测距周期，超量程返回 561cm
  *   - 遥测          app_comm.c     1s 周期上报距离（printf("%d\r\n") 格式）
  *   - 尾部风扇      motor.c        besom_run()/besom_stop()，TIM3_CH3 PWM=100
  *
- * 仿真附加设定：行驶（手动/自动）时尾部风扇联动开启，便于演示清扫过程。
+ * 仿真附加设定：
+ *   1. 行驶（手动/自动）时尾部风扇联动开启，便于演示清扫过程；
+ *   2. 前进/后退指令把双轮重置为当前档位等速，且松开 ←/→ 自动回正直行
+ *      （修复“转向后无法恢复直行”的问题）；
+ *   3. 避障阈值按真机取 20cm（固件 app_config.h 默认 25cm）。
  */
 'use strict';
 
@@ -24,7 +28,7 @@ const CMD_NAME = {
   0x07: 'MEDIUM 中速', 0x08: 'SLOW 慢速', 0x09: 'VACUUM 吸尘',
   0x10: 'AUTO 自动模式',
 };
-const OBSTACLE_DISTANCE_CM = 25;    // 避障阈值
+const OBSTACLE_DISTANCE_CM = 20;    // 避障阈值（真机 <20cm 自动转向；固件默认 25cm）
 const AVOID_BACKWARD_MS = 3000;     // 后退时长
 const AVOID_TURN_MS = 5000;         // 左转时长
 const DISTANCE_OUT_OF_RANGE = 561;  // 超量程距离
@@ -45,7 +49,7 @@ const BRUSH_BACK = 17;              // 尾部刷盘/吸尘口在车心后方距�
 const SUCK_RADIUS = 10;             // 吸尘半径（cm）
 const DUST_COUNT = 320;
 
-/* 家具（cm，矩形障碍） */
+/* 家具（cm，矩形碰撞体；绘制见 drawFurniture） */
 const FURNITURE = [
   { x: 55,  y: 35,  w: 95,  h: 45, name: '沙发' },
   { x: 330, y: 30,  w: 120, h: 75, name: '床' },
@@ -68,6 +72,7 @@ let phaseStart = 0;
 let distanceCm = DISTANCE_OUT_OF_RANGE;
 let lastCmdText = '—';
 let cmdQueue = [];          // 相当于 g_ctrlQueue
+let turning = false;        // 转向指令是否在生效（用于松开方向键自动回正）
 let dust = [], flying = []; // 地面灰尘 / 吸入中的灰尘
 let cleaned = 0;
 let fanAngle = 0, fanSpeed = 0;   // 风扇叶片动画
@@ -84,16 +89,9 @@ function toPxX(cm) { return OX + cm * SCALE; }
 function toPxY(cm) { return OY + cm * SCALE; }
 
 /* ================= 指令执行（app_control.c: Control_ApplyCommand） ================= */
-function ensureGear() {
-  // 固件里“方向”指令不改速度；键盘仿真中若当前 PWM 为 0 则补上当前档位，便于直接开车
-  if (robot.pwmL === 0 && robot.pwmR === 0) {
-    robot.pwmL = robot.gear;
-    robot.pwmR = robot.gear;
-  }
-}
-
 function applyCommand(cmd) {
   lastCmdText = '0x' + cmd.toString(16).toUpperCase().padStart(2, '0') + ' ' + (CMD_NAME[cmd] || '?');
+  turning = (cmd === CMD.LEFT || cmd === CMD.RIGHT); // 只有转向指令让回正标记保持
   switch (cmd) {
     case CMD.STOP: // 停止：退出自动模式，关电机与吸尘器
       mode = MODE.MANUAL;
@@ -103,13 +101,13 @@ function applyCommand(cmd) {
     case CMD.FORWARD:
       mode = MODE.MANUAL;
       robot.dir = 1;
-      ensureGear();
+      robot.pwmL = robot.pwmR = robot.gear; // 双轮等速：回正为直行
       robot.vacuum = true; // 仿真设定：行驶即开尾部风扇
       break;
     case CMD.BACKWARD:
       mode = MODE.MANUAL;
       robot.dir = -1;
-      ensureGear();
+      robot.pwmL = robot.pwmR = robot.gear; // 双轮等速：回正为直行
       robot.vacuum = true;
       break;
     case CMD.LEFT: // 差速左转：左 40 / 右 100
@@ -162,7 +160,7 @@ function applyCommand(cmd) {
 /* ================= 自动模式状态机（Control_UpdateAutoMode） ================= */
 function updateAutoMode() {
   if (mode === MODE.AUTO_FORWARD) {
-    if (distanceCm <= OBSTACLE_DISTANCE_CM) {
+    if (distanceCm < OBSTACLE_DISTANCE_CM) { // 真机：距离 <20cm 自动转向
       robot.dir = -1;                        // 快速后退
       robot.pwmL = robot.pwmR = PWM_FAST;
       mode = MODE.AUTO_BACKUP;
@@ -365,20 +363,167 @@ function drawRoom() {
   ctx.strokeStyle = '#4a3f33';
   ctx.lineWidth = 8;
   ctx.strokeRect(OX - 4, OY - 4, ROOM_W * SCALE + 8, ROOM_H * SCALE + 8);
-  // 家具
+  // 家具（建模）
+  drawFurniture();
+}
+
+/* ---- 家具建模（俯视细节 + 投影） ---- */
+function drawFurniture() {
+  // 地毯（茶几下面，纯装饰）
+  ctx.fillStyle = '#c9b89e';
+  roundRectPath(toPxX(203), toPxY(190), 84 * SCALE, 71 * SCALE, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#b09e82';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
   for (const f of FURNITURE) {
-    ctx.fillStyle = '#8d9bb5';
-    roundRectPath(toPxX(f.x), toPxY(f.y), f.w * SCALE, f.h * SCALE, 8);
+    const x = toPxX(f.x), y = toPxY(f.y), w = f.w * SCALE, h = f.h * SCALE;
+    // 投影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
+    roundRectPath(x + 3, y + 4, w, h, 8);
     ctx.fill();
-    ctx.strokeStyle = '#5d6a84';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = '#3c4660';
+
+    if (f.name === '沙发') drawSofa(x, y, w, h);
+    else if (f.name === '床') drawBed(x, y, w, h);
+    else if (f.name === '茶几') drawTeaTable(x, y, w, h);
+    else if (f.name === '柜子') drawCabinet(x, y, w, h);
+    else drawDesk(x, y, w, h);
+
+    // 名称标签（浅色家具用深字，其余用白字）
+    ctx.fillStyle = (f.name === '床' || f.name === '茶几')
+      ? 'rgba(52, 60, 74, 0.8)' : 'rgba(255, 255, 255, 0.92)';
     ctx.font = '12px "Microsoft YaHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(f.name, toPxX(f.x + f.w / 2), toPxY(f.y + f.h / 2));
+    ctx.fillText(f.name, x + w / 2, y + h / 2);
   }
+}
+
+function drawSofa(x, y, w, h) {
+  ctx.fillStyle = '#6a87ad';                 // 底座
+  roundRectPath(x, y, w, h, 9);
+  ctx.fill();
+  ctx.fillStyle = '#547194';                 // 靠背 + 左右扶手
+  roundRectPath(x, y, w, h * 0.24, 9);
+  ctx.fill();
+  roundRectPath(x, y + h * 0.2, w * 0.1, h * 0.8, 5);
+  ctx.fill();
+  roundRectPath(x + w * 0.9, y + h * 0.2, w * 0.1, h * 0.8, 5);
+  ctx.fill();
+  ctx.fillStyle = '#86a3c6';                 // 三个坐垫
+  const ix = x + w * 0.12, iw = w * 0.76, iy = y + h * 0.3, ih = h * 0.64;
+  const gap = 3, cw = (iw - gap * 2) / 3;
+  for (let i = 0; i < 3; i++) {
+    roundRectPath(ix + i * (cw + gap), iy, cw, ih, 4);
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#45607e';
+  ctx.lineWidth = 1.5;
+  roundRectPath(x, y, w, h, 9);
+  ctx.stroke();
+}
+
+function drawBed(x, y, w, h) {
+  ctx.fillStyle = '#8f6f4c';                 // 床架
+  roundRectPath(x, y, w, h, 6);
+  ctx.fill();
+  ctx.fillStyle = '#ece7db';                 // 床垫
+  roundRectPath(x + 3, y + 3, w - 6, h - 6, 5);
+  ctx.fill();
+  ctx.fillStyle = '#7ba7cc';                 // 被子（带折边）
+  roundRectPath(x + 3, y + h * 0.3, w - 6, h * 0.7 - 3, 5);
+  ctx.fill();
+  ctx.strokeStyle = '#5f8ab0';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x + 3, y + h * 0.36);
+  ctx.lineTo(x + w - 3, y + h * 0.36);
+  ctx.stroke();
+  ctx.fillStyle = '#f7f5ee';                 // 两个枕头
+  const pw = (w - 16) / 2;
+  roundRectPath(x + 5, y + 6, pw, h * 0.18, 5);
+  ctx.fill();
+  roundRectPath(x + 11 + pw, y + 6, pw, h * 0.18, 5);
+  ctx.fill();
+  ctx.strokeStyle = '#7a6248';
+  ctx.lineWidth = 1.5;
+  roundRectPath(x, y, w, h, 6);
+  ctx.stroke();
+}
+
+function drawTeaTable(x, y, w, h) {
+  ctx.fillStyle = '#6b4f33';                 // 四条腿
+  for (const [lx, ly] of [[x, y], [x + w - 5, y], [x, y + h - 5], [x + w - 5, y + h - 5]]) {
+    ctx.fillRect(lx, ly, 5, 5);
+  }
+  ctx.fillStyle = '#a87f52';                 // 木边
+  roundRectPath(x, y, w, h, 8);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(190, 225, 238, 0.85)'; // 玻璃面
+  roundRectPath(x + 5, y + 5, w - 10, h - 10, 5);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; // 玻璃高光
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x + 9, y + h - 12);
+  ctx.lineTo(x + w - 14, y + 9);
+  ctx.stroke();
+  ctx.strokeStyle = '#7d5c39';
+  ctx.lineWidth = 1.5;
+  roundRectPath(x, y, w, h, 8);
+  ctx.stroke();
+}
+
+function drawCabinet(x, y, w, h) {
+  ctx.fillStyle = '#9a7a52';                 // 柜体
+  roundRectPath(x, y, w, h, 4);
+  ctx.fill();
+  ctx.fillStyle = '#ad8a5e';                 // 顶板
+  roundRectPath(x + 2, y + 2, w - 4, 7, 3);
+  ctx.fill();
+  ctx.strokeStyle = '#6e5436';               // 对开门
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y + 11);
+  ctx.lineTo(x + w / 2, y + h - 4);
+  ctx.stroke();
+  ctx.fillStyle = '#5d4630';                 // 把手
+  ctx.beginPath();
+  ctx.arc(x + w / 2 - 4, y + h / 2 + 3, 2, 0, Math.PI * 2);
+  ctx.arc(x + w / 2 + 4, y + h / 2 + 3, 2, 0, Math.PI * 2);
+  ctx.fill();
+  roundRectPath(x, y, w, h, 4);
+  ctx.stroke();
+}
+
+function drawDesk(x, y, w, h) {
+  ctx.fillStyle = '#5d6a84';                 // 椅子（装饰）
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h + 16, 11, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4a5568';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h + 16, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#6b4f33';                 // 桌腿
+  for (const [lx, ly] of [[x + 2, y + 2], [x + w - 7, y + 2], [x + 2, y + h - 7], [x + w - 7, y + h - 7]]) {
+    ctx.fillRect(lx, ly, 5, 5);
+  }
+  ctx.fillStyle = '#b08c5e';                 // 桌面
+  roundRectPath(x, y, w, h, 5);
+  ctx.fill();
+  ctx.fillStyle = '#9a7a52';                 // 抽屉柜
+  roundRectPath(x + w * 0.62, y + 4, w * 0.34, h - 8, 3);
+  ctx.fill();
+  ctx.fillStyle = '#5d4630';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.79, y + h / 2, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#7d5c39';
+  ctx.lineWidth = 1.5;
+  roundRectPath(x, y, w, h, 5);
+  ctx.stroke();
 }
 
 function drawDust() {
@@ -429,31 +574,33 @@ function drawRobot() {
     ctx.setLineDash([]);
   }
 
-  // 车轮（两侧大驱动轮，带滚动胎纹）
+  // 车轮（四轮驱动：每侧前后两个，带滚动胎纹）
+  const treadPhase = ((wheelRoll % 1.2) + 1.2) % 1.2;
   for (const side of [-1, 1]) {
     const wy = side * 11.8;
-    ctx.fillStyle = '#1c1f26';
-    roundRectPath(-6, wy - 1.8, 10, 3.6, 1.6);
-    ctx.fill();
-    ctx.strokeStyle = '#3a3f4c';
-    ctx.lineWidth = 0.35;
-    ctx.stroke();
-    // 胎纹
-    ctx.strokeStyle = '#4c5260';
-    ctx.lineWidth = 0.45;
-    const phase = ((wheelRoll % 2) + 2) % 2;
-    for (let i = 0; i < 5; i++) {
-      const tx = -5 + i * 2 + phase;
-      ctx.beginPath();
-      ctx.moveTo(tx, wy - 1.5);
-      ctx.lineTo(tx, wy + 1.5);
+    for (const wx of [-8.5, 3.5]) {
+      ctx.fillStyle = '#1c1f26';
+      roundRectPath(wx - 3, wy - 1.8, 6, 3.6, 1.6);
+      ctx.fill();
+      ctx.strokeStyle = '#3a3f4c';
+      ctx.lineWidth = 0.35;
       ctx.stroke();
+      // 胎纹
+      ctx.strokeStyle = '#4c5260';
+      ctx.lineWidth = 0.45;
+      for (const off of [-1.6, 0, 1.6]) {
+        const tx = wx + off + treadPhase;
+        ctx.beginPath();
+        ctx.moveTo(tx, wy - 1.5);
+        ctx.lineTo(tx, wy + 1.5);
+        ctx.stroke();
+      }
+      // 轮毂
+      ctx.fillStyle = '#6b7280';
+      ctx.beginPath();
+      ctx.arc(wx, wy, 0.9, 0, Math.PI * 2);
+      ctx.fill();
     }
-    // 轮毂
-    ctx.fillStyle = '#6b7280';
-    ctx.beginPath();
-    ctx.arc(-1, wy, 1.1, 0, Math.PI * 2);
-    ctx.fill();
   }
 
   // 尾部风扇舱（圆形舱体）
@@ -562,7 +709,7 @@ function drawRobot() {
   const nx = toPxX(robot.x + c * 18), ny = toPxY(robot.y + s * 18);
   if (mode !== MODE.MANUAL) {
     const dpx = Math.min(distanceCm, 120) * SCALE;
-    ctx.strokeStyle = distanceCm <= OBSTACLE_DISTANCE_CM
+    ctx.strokeStyle = distanceCm < OBSTACLE_DISTANCE_CM
       ? 'rgba(248, 113, 113, 0.8)' : 'rgba(52, 211, 153, 0.55)';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
@@ -605,7 +752,7 @@ function updateHud() {
   hud.fan.className = 'badge ' + (robot.vacuum ? 'on' : 'off');
   hud.dist.textContent = distanceCm >= DISTANCE_OUT_OF_RANGE
     ? '> ' + DISTANCE_OUT_OF_RANGE + ' cm（超量程）' : distanceCm + ' cm';
-  hud.dist.style.color = distanceCm <= OBSTACLE_DISTANCE_CM ? '#f87171' : '';
+  hud.dist.style.color = distanceCm < OBSTACLE_DISTANCE_CM ? '#f87171' : '';
   hud.cmd.textContent = lastCmdText;
   const total = dust.length;
   const pct = total ? Math.round((cleaned / total) * 100) : 0;
@@ -636,15 +783,28 @@ const KEY_MAP = {
   ' ': CMD.STOP,
 };
 
+function isTurnKey(key) {
+  return key === 'a' || key === 'arrowleft' || key === 'd' || key === 'arrowright';
+}
+
 window.addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   if (key === 'r') { resetSim(); return; }
   const cmd = KEY_MAP[key];
   if (cmd === undefined) return;
   e.preventDefault();
+  if (cmd === CMD.LEFT || cmd === CMD.RIGHT) turning = true; // 先打标记，快速点按也能回正
   // 队列深度 8，与 g_ctrlQueue 一致；按住重复触发时去重
   if (cmdQueue.length < 8 && cmdQueue[cmdQueue.length - 1] !== cmd) {
     cmdQueue.push(cmd);
+  }
+});
+
+window.addEventListener('keyup', e => {
+  // 松开转向键：只要转向仍生效（含已入队未执行），就回正为直行
+  if (isTurnKey(e.key.toLowerCase()) && turning && mode === MODE.MANUAL &&
+      cmdQueue.length < 8) {
+    cmdQueue.push(CMD.FORWARD);
   }
 });
 
@@ -654,6 +814,7 @@ function resetSim() {
   robot.dir = 1; robot.pwmL = 0; robot.pwmR = 0;
   robot.gear = PWM_MEDIUM; robot.vacuum = false;
   mode = MODE.MANUAL;
+  turning = false;
   distanceCm = DISTANCE_OUT_OF_RANGE;
   lastCmdText = '—';
   cmdQueue = [];

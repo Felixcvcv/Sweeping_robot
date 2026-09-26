@@ -151,8 +151,8 @@
       <table class="keys">
         <tr><td><kbd>W</kbd> / <kbd>↑</kbd></td><td class="cmd">0x02</td><td>前进</td></tr>
         <tr><td><kbd>S</kbd> / <kbd>↓</kbd></td><td class="cmd">0x03</td><td>后退</td></tr>
-        <tr><td><kbd>A</kbd> / <kbd>←</kbd></td><td class="cmd">0x04</td><td>左转（差速 40/100）</td></tr>
-        <tr><td><kbd>D</kbd> / <kbd>→</kbd></td><td class="cmd">0x05</td><td>右转（差速 100/40）</td></tr>
+        <tr><td><kbd>A</kbd> / <kbd>←</kbd></td><td class="cmd">0x04</td><td>左转（差速 40/100，松开回正）</td></tr>
+        <tr><td><kbd>D</kbd> / <kbd>→</kbd></td><td class="cmd">0x05</td><td>右转（差速 100/40，松开回正）</td></tr>
         <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td class="cmd">0x08/07/06</td><td>慢速 60 / 中速 80 / 快速 100</td></tr>
         <tr><td><kbd>F</kbd></td><td class="cmd">0x09</td><td>吸尘器（尾部风扇）开/关</td></tr>
         <tr><td><kbd>G</kbd>/<kbd>Enter</kbd></td><td class="cmd">0x10</td><td>自动模式（避障 + 吸尘）</td></tr>
@@ -163,8 +163,8 @@
 
     <div class="card hint">
       仿真设定：机器人一旦开始行驶（手动或自动）尾部风扇即联动开启，吸入尾部刷盘
-      附近的灰尘；停止（0x01）时风扇关闭。自动模式复刻固件状态机：
-      前进 → 障碍 ≤25cm → 快速后退 3s → 左转 5s → 继续前进。
+      附近的灰尘；停止（0x01）时风扇关闭；松开 ← / → 转向键自动回正直行。
+      自动模式：前进 → 障碍 &lt;20cm → 快速后退 3s → 左转 5s → 继续前进。
     </div>
   </aside>
 </main>
